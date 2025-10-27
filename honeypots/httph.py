@@ -81,7 +81,7 @@ class HTTPHoneypot:
                 "root": "toor",
                 "user": "password"
             },
-            "log_directory": "http_honeypot_logs",
+            "log_directory": "logs/http_honeypot_logs",
             "log_file": "http_honeypot.log",
             "emulate_vulnerabilities": True,
             "filesystem": {
@@ -116,7 +116,7 @@ class HTTPHoneypot:
     
     def setup_logging(self):
         """Setup logging"""
-        log_dir = Path(self.config.get("log_directory", "http_honeypot_logs"))
+        log_dir = Path(self.config.get("log_directory", "logs/http_honeypot_logs"))
         log_dir.mkdir(exist_ok=True)
         
         log_file = log_dir / self.config.get("log_file", "http_honeypot.log")
@@ -155,7 +155,7 @@ class HTTPHoneypot:
     
     def save_attack_log(self, log_entry):
         """Save individual attack logs"""
-        log_dir = Path(self.config.get("log_directory", "http_honeypot_logs"))
+        log_dir = Path(self.config.get("log_directory", "logs/http_honeypot_logs"))
         attacks_dir = log_dir / "attacks"
         attacks_dir.mkdir(exist_ok=True)
         
@@ -610,5 +610,5 @@ UPLOAD_TEMPLATE = """
 if __name__ == "__main__":
     # Note: Requires Flask library
     # Install with: pip install flask
-    honeypot = HTTPHoneypot("http_honeypot_config.json")
+    honeypot = HTTPHoneypot("configs/http_honeypot_config.json")
     honeypot.start()
