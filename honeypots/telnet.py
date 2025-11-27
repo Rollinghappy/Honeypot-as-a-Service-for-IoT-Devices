@@ -248,7 +248,7 @@ class TelnetSession:
 
 class TelnetHoneypot:
     """Main honeypot server"""
-    def __init__(self, config_file="honeypot_config.json"):
+    def __init__(self, config_file="telnet_honeypot_config.json"):
         self.load_config(config_file)
         self.setup_logging()
         self.running = False
