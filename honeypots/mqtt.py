@@ -208,7 +208,9 @@ class MQTTSession:
             "client_id": self.client_id,
             "username": self.username,
             "type": activity_type,
-            "data": data
+            "data": data,
+            "protocol": "mqtt"
+
         }
         self.session_log.append(entry)
         self.logger.info(json.dumps(entry))

@@ -299,7 +299,8 @@ class DNP3Session:
             "ip": self.addr[0],
             "port": self.addr[1],
             "type": activity_type,
-            "data": data
+            "data": data,
+            "protocol": "dnp3"
         }
         self.session_log.append(entry)
         self.logger.info(json.dumps(entry))

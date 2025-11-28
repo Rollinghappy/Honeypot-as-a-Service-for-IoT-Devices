@@ -201,7 +201,9 @@ class ModbusSession:
             "ip": self.addr[0],
             "port": self.addr[1],
             "type": activity_type,
-            "data": data
+            "data": data,
+            "protocol": "modbus"
+
         }
         self.session_log.append(entry)
         self.logger.info(json.dumps(entry))
@@ -564,7 +566,7 @@ class ModbusHoneypot:
         """Load configuration from file"""
         default_config = {
             "host": "0.0.0.0",
-            "port": 502,
+            "port": 1502,
             "device_name": "Industrial PLC Controller",
             # UPDATED: logs path
             "log_directory": "../logs",

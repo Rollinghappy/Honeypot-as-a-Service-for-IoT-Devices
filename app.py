@@ -18,6 +18,9 @@ CONFIGS_DIR = BASE_DIR / 'configs'
 HONEYPOTS_DIR = BASE_DIR / 'honeypots'
 
 PROTOCOLS = ['telnet', 'ssh', 'http', 'mqtt', 'dnp3', 'coap', 'modbus']
+SCRIPT_NAME_MAP = {
+  "http": "httph"
+}
 
 # Simple in-memory tracking of running honeypots
 running_honeypots = {}
@@ -252,7 +255,7 @@ def get_default_config(protocol):
     'mqtt': 1883,
     'dnp3': 20000,
     'coap': 5683,
-    'modbus': 502
+    'modbus': 1502
   }
   base_config['port'] = port_map.get(protocol, 9999)
 
@@ -348,7 +351,9 @@ def api_start_honeypot(protocol):
   if protocol in running_honeypots:
     return jsonify({'error': 'Honeypot already running'}), 400
 
-  honeypot_script = HONEYPOTS_DIR / f'{protocol}.py'
+  script_name = SCRIPT_NAME_MAP.get(protocol, protocol)
+  honeypot_script = HONEYPOTS_DIR / f'{script_name}.py'
+
   if not honeypot_script.exists():
     return jsonify({'error': 'Honeypot script not found'}), 404
 

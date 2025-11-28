@@ -465,7 +465,8 @@ class SSHSession:
                     "port": self.addr[1],
                     "username": self.username,
                     "start": self.session_log[0]["timestamp"] if self.session_log else None,
-                    "end": self.session_log[-1]["timestamp"] if self.session_log else None
+                    "end": self.session_log[-1]["timestamp"] if self.session_log else None,
+                    "protocol": "ssh"
                 },
                 "auth_attempts": self.ssh_server.auth_attempts,
                 "activity": self.session_log

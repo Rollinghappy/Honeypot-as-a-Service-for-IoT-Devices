@@ -98,7 +98,8 @@ class TelnetSession:
             "ip": self.addr[0],
             "port": self.addr[1],
             "type": activity_type,
-            "data": data
+            "data": data,
+            "protocol": "telnet"  
         }
         self.session_log.append(entry)
         self.logger.info(json.dumps(entry))
