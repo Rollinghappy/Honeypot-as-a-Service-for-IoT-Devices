@@ -1,0 +1,58 @@
+{
+  "allow_all_logins": true,
+  "emulate_vulnerabilities": true,
+  "fake_pages": {
+    "/admin": "Admin Login",
+    "/console": "Management Console",
+    "/login": "User Login",
+    "/phpmyadmin": "phpMyAdmin",
+    "/wp-admin": "WordPress Admin"
+  },
+  "files": {
+    "/etc/passwd": "root:x:0:0:root:/root:/bin/bash",
+    "/var/www/html/config.php": "<?php $db_pass = 'P@ssw0rd123'; ?>",
+    "/var/www/html/index.html": "<html><body>Welcome</body></html>"
+  },
+  "filesystem": {
+    "/": [
+      "bin",
+      "etc",
+      "home",
+      "var",
+      "usr",
+      "tmp"
+    ],
+    "/etc": [
+      "passwd",
+      "shadow",
+      "hosts"
+    ],
+    "/var": [
+      "www",
+      "log"
+    ],
+    "/var/www": [
+      "html"
+    ],
+    "/var/www/html": [
+      "index.html",
+      "admin",
+      "config.php",
+      "uploads"
+    ]
+  },
+  "host": "0.0.0.0",
+  "hostname": "web-server",
+  "log_directory": "../logs",
+  "log_file": "http.logs",
+  "port": 7000,
+  "server_header": "Apache/2.4.41 (Ubuntu)",
+  "ssl_cert": "cert.pem",
+  "ssl_enabled": false,
+  "ssl_key": "key.pem",
+  "valid_credentials": {
+    "admin": "admin",
+    "root": "toor",
+    "user": "password"
+  }
+}

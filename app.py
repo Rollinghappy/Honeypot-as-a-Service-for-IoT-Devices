@@ -251,7 +251,7 @@ def get_default_config(protocol):
   port_map = {
     'telnet': 2323,
     'ssh': 2222,
-    'http': 8080,
+    'http': 12000,
     'mqtt': 1883,
     'dnp3': 20000,
     'coap': 5683,
@@ -345,32 +345,75 @@ def api_get_status():
 
 @app.route('/api/honeypot/<protocol>/start', methods=['POST'])
 def api_start_honeypot(protocol):
-  """Start a honeypot process for the given protocol."""
-  protocol = protocol.lower()
+    """Start a honeypot process for the given protocol."""
+    protocol = protocol.lower()
 
-  if protocol in running_honeypots:
-    return jsonify({'error': 'Honeypot already running'}), 400
+    if protocol in running_honeypots:
+        return jsonify({'error': 'Honeypot already running'}), 400
 
-  script_name = SCRIPT_NAME_MAP.get(protocol, protocol)
-  honeypot_script = HONEYPOTS_DIR / f'{script_name}.py'
+    script_name = SCRIPT_NAME_MAP.get(protocol, protocol)
+    honeypot_script = HONEYPOTS_DIR / f'{script_name}.py'
 
-  if not honeypot_script.exists():
-    return jsonify({'error': 'Honeypot script not found'}), 404
+    if not honeypot_script.exists():
+        return jsonify({'error': 'Honeypot script not found'}), 404
 
-  try:
-    # Start the honeypot in a separate process.
-    # The honeypot script itself will read ../configs/<protocol>.json
-    process = subprocess.Popen(
-      ['python3', str(honeypot_script)],
-      stdout=subprocess.PIPE,
-      stderr=subprocess.PIPE,
-      cwd=HONEYPOTS_DIR  # 👈 key fix: make ../logs and ../configs resolve to main/logs & main/configs
-    )
-    running_honeypots[protocol] = True
+    try:
+        # Ensure logs dir exists (for HTTP process logs)
+        LOGS_DIR.mkdir(exist_ok=True, parents=True)
 
-    return jsonify({'success': True, 'message': f'{protocol} honeypot started'})
-  except Exception as e:
-    return jsonify({'error': str(e)}), 500
+        if protocol == 'http':
+            # --- Special-case: start HTTP honeypot safely to avoid FD inheritance ---
+            # Prepare child environment (strip reloader markers)
+            child_env = os.environ.copy()
+            child_env.pop('WERKZEUG_RUN_MAIN', None)
+            child_env.pop('FLASK_RUN_FROM_CLI', None)
+            child_env.pop('PYTHONUNBUFFERED', None)
+
+            # Log files for child's stdout/stderr
+            stdout_path = LOGS_DIR / f'{protocol}_process.stdout.log'
+            stderr_path = LOGS_DIR / f'{protocol}_process.stderr.log'
+            stdout_f = open(stdout_path, 'a')
+            stderr_f = open(stderr_path, 'a')
+
+            # Start detached child that does NOT inherit parent's open FDs.
+            # close_fds=True prevents inheriting the dashboard's listening sockets
+            # start_new_session=True isolates the process (like setsid)
+            process = subprocess.Popen(
+                ['python3', str(honeypot_script)],
+                stdout=stdout_f,
+                stderr=stderr_f,
+                cwd=HONEYPOTS_DIR,
+                env=child_env,
+                close_fds=True,
+                start_new_session=True
+            )
+
+            # Bookkeeping: store PID and log paths so you can stop/inspect later
+            running_honeypots[protocol] = {
+                'pid': process.pid,
+                'stdout_log': str(stdout_path),
+                'stderr_log': str(stderr_path),
+                'script': str(honeypot_script)
+            }
+
+            return jsonify({'success': True, 'message': f'{protocol} honeypot started', 'pid': process.pid})
+
+        else:
+            # --- Default behavior for other protocols (unchanged) ---
+            process = subprocess.Popen(
+                ['python3', str(honeypot_script)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=HONEYPOTS_DIR
+            )
+            # For compatibility with existing UI/logic keep the same "running" flag shape
+            running_honeypots[protocol] = True
+
+            return jsonify({'success': True, 'message': f'{protocol} honeypot started'})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 
 @app.route('/api/honeypot/<protocol>/stop', methods=['POST'])

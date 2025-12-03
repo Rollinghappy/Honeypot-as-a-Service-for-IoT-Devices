@@ -1,5 +1,5 @@
 // src/App.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   MapPin,
   Activity,
@@ -34,11 +34,36 @@ const Dashboard = () => {
   const [rawLoading, setRawLoading] = useState(false);
   const [rawError, setRawError] = useState(null);
 
+  // map image ref + measured size
+  const mapImgRef = useRef(null);
+  const [mapSize, setMapSize] = useState({ width: 800, height: 400 });
+
   useEffect(() => {
     fetchDashboardData();
     const interval = setInterval(fetchDashboardData, 10000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // keep mapSize updated on resize so overlay coordinates match rendered size
+  useEffect(() => {
+    const updateSize = () => {
+      try {
+        const img = mapImgRef.current;
+        if (img) {
+          const rect = img.getBoundingClientRect();
+          if (rect.width && rect.height) {
+            setMapSize({ width: rect.width, height: rect.height });
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    window.addEventListener('resize', updateSize);
+    // call once to capture initial rendered size
+    updateSize();
+    return () => window.removeEventListener('resize', updateSize);
   }, []);
 
   const fetchDashboardData = async () => {
@@ -178,49 +203,103 @@ const Dashboard = () => {
     );
   };
 
+  const latLonToXY = (lat, lon, width, height) => {
+    // Equirectangular projection:
+    // x: map lon (-180..180) -> (0..width)
+    // y: map lat (  90..-90) -> (0..height)
+    const x = ((lon + 180) / 360) * width;
+    const y = ((90 - lat) / 180) * height;
+    return { x, y };
+  };
+
   const renderWorldMap = () => {
     const markers = getLocationMarkers();
 
-    return (
-      <div className="relative w-full h-full bg-gray-50 rounded-lg overflow-hidden">
-        <svg viewBox="0 0 800 400" className="w-full h-full">
-          {/* Simplified world map outline */}
-          <path
-            d="M50,200 Q200,150 400,200 T750,200"
-            stroke="#D4A574"
-            strokeWidth="2"
-            fill="none"
-            opacity="0.3"
-          />
-          <path
-            d="M50,250 Q200,220 400,250 T750,250"
-            stroke="#D4A574"
-            strokeWidth="2"
-            fill="none"
-            opacity="0.3"
-          />
+    // image path in public folder
+    const imgSrc = '/world-map.svg';
 
-          {/* Plot markers based on lat/long */}
+    // Inline styles for container
+    const containerStyle = {
+      position: 'relative',
+      width: '100%',
+      height: '100%',
+      minHeight: '240px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: '#f8f8f8'
+    };
+
+    const imgStyle = {
+      maxWidth: '100%',
+      maxHeight: '100%',
+      display: 'block',
+      width: '100%',
+      height: 'auto',
+      userSelect: 'none',
+      pointerEvents: 'none'
+    };
+
+    // overlay svg fills the container and places markers relative to measured image size
+    const overlayStyle = {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      pointerEvents: 'none'
+    };
+
+    // When image loads, capture its rendered size to compute coordinates
+    const onImgLoad = (e) => {
+      try {
+        const img = e.target;
+        const rect = img.getBoundingClientRect();
+        if (rect.width && rect.height) {
+          setMapSize({ width: rect.width, height: rect.height });
+        } else {
+          setMapSize({ width: 800, height: 400 });
+        }
+      } catch (err) {
+        setMapSize({ width: 800, height: 400 });
+      }
+    };
+
+    return (
+      <div style={containerStyle} className="relative w-full h-full bg-gray-50 rounded-lg overflow-hidden">
+        {/* World map image (from public/) */}
+        <img
+          ref={mapImgRef}
+          src={imgSrc}
+          alt="World map"
+          style={imgStyle}
+          onLoad={onImgLoad}
+          onError={() => {
+            // If image load fails, set fallback map size
+            setMapSize({ width: 800, height: 400 });
+          }}
+        />
+
+        {/* SVG overlay for markers — uses element width/height rather than natural size for responsive layout */}
+        <svg style={overlayStyle} viewBox={`0 0 ${mapSize.width} ${mapSize.height}`} preserveAspectRatio="none">
           {markers.map((marker, i) => {
-            const x = ((marker.lon + 180) / 360) * 800;
-            const y = ((90 - marker.lat) / 180) * 400;
+            const lat = Number(marker.lat) || 0;
+            const lon = Number(marker.lon) || 0;
+            const { x, y } = latLonToXY(lat, lon, mapSize.width, mapSize.height);
+            const r = Math.min(marker.count * 2 + 5, 18);
 
             return (
-              <g key={i}>
-                <circle
-                  cx={x}
-                  cy={y}
-                  r={Math.min(marker.count * 2 + 5, 20)}
-                  fill="#D4A574"
-                  opacity="0.6"
-                />
-                <circle cx={x} cy={y} r="3" fill="#8B6F47" />
+              <g key={marker.ip || i} transform={`translate(${x}, ${y})`} style={{ pointerEvents: 'auto' }}>
+                <circle r={r} fill="#D4A574" opacity="0.6" />
+                <circle r={Math.max(2, Math.floor(r / 3))} fill="#8B6F47" />
                 <title>{`${marker.ip}: ${marker.count} events`}</title>
               </g>
             );
           })}
         </svg>
-        <div className="absolute bottom-2 left-2 text-xs text-gray-500">
+
+        {/* Small legend */}
+        <div style={{ position: 'absolute', bottom: 8, left: 8, fontSize: 12, color: '#6b7280', display: 'flex', alignItems: 'center' }}>
           <Globe className="w-4 h-4 inline mr-1" />
           Attack Origin Map
         </div>
