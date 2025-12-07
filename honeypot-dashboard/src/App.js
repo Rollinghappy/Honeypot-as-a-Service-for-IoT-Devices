@@ -1,5 +1,5 @@
 // src/App.js
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   MapPin,
   Activity,
@@ -13,7 +13,9 @@ import {
   Play,
   Square,
   RefreshCw,
-  FileText
+  FileText,
+  Filter,
+  X
 } from 'lucide-react';
 
 const API_BASE = 'http://localhost:5000/api';
@@ -34,9 +36,10 @@ const Dashboard = () => {
   const [rawLoading, setRawLoading] = useState(false);
   const [rawError, setRawError] = useState(null);
 
-  // map image ref + measured size
-  const mapImgRef = useRef(null);
-  const [mapSize, setMapSize] = useState({ width: 800, height: 400 });
+  // filter state
+  const [filters, setFilters] = useState({});
+  const [showFilters, setShowFilters] = useState(false);
+  const [availableFields, setAvailableFields] = useState([]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -45,26 +48,28 @@ const Dashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // keep mapSize updated on resize so overlay coordinates match rendered size
+  // Extract all available fields from logs
   useEffect(() => {
-    const updateSize = () => {
-      try {
-        const img = mapImgRef.current;
-        if (img) {
-          const rect = img.getBoundingClientRect();
-          if (rect.width && rect.height) {
-            setMapSize({ width: rect.width, height: rect.height });
-          }
+    const fields = new Set();
+    logs.forEach((log) => {
+      const extractFields = (obj, prefix = '') => {
+        if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+          Object.keys(obj).forEach((key) => {
+            const fullKey = prefix ? `${prefix}.${key}` : key;
+            if (obj[key] !== null && obj[key] !== undefined) {
+              if (typeof obj[key] === 'object' && !Array.isArray(obj[key]) && obj[key] !== null) {
+                extractFields(obj[key], fullKey);
+              } else {
+                fields.add(fullKey);
+              }
+            }
+          });
         }
-      } catch (e) {
-        // ignore
-      }
-    };
-    window.addEventListener('resize', updateSize);
-    // call once to capture initial rendered size
-    updateSize();
-    return () => window.removeEventListener('resize', updateSize);
-  }, []);
+      };
+      extractFields(log);
+    });
+    setAvailableFields(Array.from(fields).sort());
+  }, [logs]);
 
   const fetchDashboardData = async () => {
     try {
@@ -110,9 +115,64 @@ const Dashboard = () => {
     }
   };
 
+  // Get nested value from object using dot notation
+  const getNestedValue = (obj, path) => {
+    return path.split('.').reduce((current, key) => {
+      return current && typeof current === 'object' ? current[key] : undefined;
+    }, obj);
+  };
+
+  // Filter logs based on active filters
+  const getFilteredLogs = () => {
+    if (Object.keys(filters).length === 0) {
+      return logs;
+    }
+
+    return logs.filter((log) => {
+      return Object.entries(filters).every(([field, filterValue]) => {
+        if (!filterValue || filterValue.trim() === '') {
+          return true; // Empty filter means no filtering for this field
+        }
+
+        const value = getNestedValue(log, field);
+        
+        if (value === undefined || value === null) {
+          return false;
+        }
+
+        // Convert to string for comparison
+        const valueStr = typeof value === 'object' 
+          ? JSON.stringify(value).toLowerCase()
+          : String(value).toLowerCase();
+        
+        const filterStr = filterValue.toLowerCase();
+        
+        // Check if value contains the filter string
+        return valueStr.includes(filterStr);
+      });
+    });
+  };
+
+  const handleFilterChange = (field, value) => {
+    setFilters((prev) => {
+      const newFilters = { ...prev };
+      if (value && value.trim() !== '') {
+        newFilters[field] = value;
+      } else {
+        delete newFilters[field];
+      }
+      return newFilters;
+    });
+  };
+
+  const clearFilters = () => {
+    setFilters({});
+  };
+
   const getLocationMarkers = () => {
     const markers = {};
-    logs.forEach((log) => {
+    const filteredLogs = getFilteredLogs();
+    filteredLogs.forEach((log) => {
       if (
         log.ip &&
         log.location &&
@@ -203,103 +263,49 @@ const Dashboard = () => {
     );
   };
 
-  const latLonToXY = (lat, lon, width, height) => {
-    // Equirectangular projection:
-    // x: map lon (-180..180) -> (0..width)
-    // y: map lat (  90..-90) -> (0..height)
-    const x = ((lon + 180) / 360) * width;
-    const y = ((90 - lat) / 180) * height;
-    return { x, y };
-  };
-
   const renderWorldMap = () => {
     const markers = getLocationMarkers();
 
-    // image path in public folder
-    const imgSrc = '/world-map.svg';
-
-    // Inline styles for container
-    const containerStyle = {
-      position: 'relative',
-      width: '100%',
-      height: '100%',
-      minHeight: '240px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: '#f8f8f8'
-    };
-
-    const imgStyle = {
-      maxWidth: '100%',
-      maxHeight: '100%',
-      display: 'block',
-      width: '100%',
-      height: 'auto',
-      userSelect: 'none',
-      pointerEvents: 'none'
-    };
-
-    // overlay svg fills the container and places markers relative to measured image size
-    const overlayStyle = {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      width: '100%',
-      height: '100%',
-      pointerEvents: 'none'
-    };
-
-    // When image loads, capture its rendered size to compute coordinates
-    const onImgLoad = (e) => {
-      try {
-        const img = e.target;
-        const rect = img.getBoundingClientRect();
-        if (rect.width && rect.height) {
-          setMapSize({ width: rect.width, height: rect.height });
-        } else {
-          setMapSize({ width: 800, height: 400 });
-        }
-      } catch (err) {
-        setMapSize({ width: 800, height: 400 });
-      }
-    };
-
     return (
-      <div style={containerStyle} className="relative w-full h-full bg-gray-50 rounded-lg overflow-hidden">
-        {/* World map image (from public/) */}
-        <img
-          ref={mapImgRef}
-          src={imgSrc}
-          alt="World map"
-          style={imgStyle}
-          onLoad={onImgLoad}
-          onError={() => {
-            // If image load fails, set fallback map size
-            setMapSize({ width: 800, height: 400 });
-          }}
-        />
+      <div className="relative w-full h-full bg-gray-50 rounded-lg overflow-hidden">
+        <svg viewBox="0 0 800 400" className="w-full h-full">
+          {/* Simplified world map outline */}
+          <path
+            d="M50,200 Q200,150 400,200 T750,200"
+            stroke="#D4A574"
+            strokeWidth="2"
+            fill="none"
+            opacity="0.3"
+          />
+          <path
+            d="M50,250 Q200,220 400,250 T750,250"
+            stroke="#D4A574"
+            strokeWidth="2"
+            fill="none"
+            opacity="0.3"
+          />
 
-        {/* SVG overlay for markers — uses element width/height rather than natural size for responsive layout */}
-        <svg style={overlayStyle} viewBox={`0 0 ${mapSize.width} ${mapSize.height}`} preserveAspectRatio="none">
+          {/* Plot markers based on lat/long */}
           {markers.map((marker, i) => {
-            const lat = Number(marker.lat) || 0;
-            const lon = Number(marker.lon) || 0;
-            const { x, y } = latLonToXY(lat, lon, mapSize.width, mapSize.height);
-            const r = Math.min(marker.count * 2 + 5, 18);
+            const x = ((marker.lon + 180) / 360) * 800;
+            const y = ((90 - marker.lat) / 180) * 400;
 
             return (
-              <g key={marker.ip || i} transform={`translate(${x}, ${y})`} style={{ pointerEvents: 'auto' }}>
-                <circle r={r} fill="#D4A574" opacity="0.6" />
-                <circle r={Math.max(2, Math.floor(r / 3))} fill="#8B6F47" />
+              <g key={i}>
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={Math.min(marker.count * 2 + 5, 20)}
+                  fill="#D4A574"
+                  opacity="0.6"
+                />
+                <circle cx={x} cy={y} r="3" fill="#8B6F47" />
                 <title>{`${marker.ip}: ${marker.count} events`}</title>
               </g>
             );
           })}
         </svg>
-
-        {/* Small legend */}
-        <div style={{ position: 'absolute', bottom: 8, left: 8, fontSize: 12, color: '#6b7280', display: 'flex', alignItems: 'center' }}>
+        <div className="absolute bottom-2 left-2 text-xs text-gray-500">
           <Globe className="w-4 h-4 inline mr-1" />
           Attack Origin Map
         </div>
@@ -406,10 +412,81 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Timeline */}
         <div className="xl:col-span-2 bg-white p-6 rounded-lg border border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items_center">
-            <Clock className="w-5 h-5 mr-2 text-gray-600" />
-            Attack / Event Timeline
-          </h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+              <Clock className="w-5 h-5 mr-2 text-gray-600" />
+              Attack / Event Timeline
+            </h3>
+            <div className="flex items-center space-x-2">
+              {Object.keys(filters).length > 0 && (
+                <span className="text-xs text-gray-500">
+                  {getFilteredLogs().length} of {logs.length} events
+                </span>
+              )}
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className={`flex items-center px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                  showFilters || Object.keys(filters).length > 0
+                    ? 'bg-gray-100 border-gray-300 text-gray-800'
+                    : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <Filter className="w-4 h-4 mr-1.5" />
+                Filters
+                {Object.keys(filters).length > 0 && (
+                  <span className="ml-1.5 px-1.5 py-0.5 bg-gray-300 rounded text-xs">
+                    {Object.keys(filters).length}
+                  </span>
+                )}
+              </button>
+              {Object.keys(filters).length > 0 && (
+                <button
+                  onClick={clearFilters}
+                  className="flex items-center px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+                  title="Clear all filters"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Filter Panel */}
+          {showFilters && (
+            <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-semibold text-gray-700">Filter Events</h4>
+                <button
+                  onClick={() => setShowFilters(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-64 overflow-y-auto">
+                {availableFields.map((field) => (
+                  <div key={field} className="flex flex-col">
+                    <label className="text-xs font-medium text-gray-600 mb-1">
+                      {field}
+                    </label>
+                    <input
+                      type="text"
+                      value={filters[field] || ''}
+                      onChange={(e) => handleFilterChange(field, e.target.value)}
+                      placeholder={`Filter by ${field}`}
+                      className="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-gray-400 focus:border-transparent"
+                    />
+                  </div>
+                ))}
+              </div>
+              {availableFields.length === 0 && (
+                <div className="text-sm text-gray-400 text-center py-4">
+                  No events available to extract fields from
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {logs.length === 0 && (
               <div className="text-sm text-gray-400">
@@ -417,7 +494,7 @@ const Dashboard = () => {
                 up here.
               </div>
             )}
-            {logs.slice(0, 100).map((log, i) => (
+            {getFilteredLogs().slice(0, 100).map((log, i) => (
               <div
                 key={log.id || `${log.ip}-${log.timestamp}-${i}`}
                 onClick={() => setSelectedAttack(log)}
