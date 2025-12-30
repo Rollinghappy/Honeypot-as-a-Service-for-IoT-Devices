@@ -1,5 +1,5 @@
 // src/App.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   MapPin,
   Activity,
@@ -22,6 +22,66 @@ const API_BASE = 'http://localhost:5000/api';
 
 const PROTOCOLS = ['telnet', 'ssh', 'http', 'mqtt', 'dnp3', 'coap', 'modbus'];
 
+// Mapping for human-readable filter labels
+const FIELD_LABELS = {
+  // Core Identity
+  'ip': 'Source IP Address',
+  'port': 'Target Port',
+  'protocol': 'Protocol',
+  'type': 'Event Type',
+  'timestamp': 'Timestamp',
+  'username': 'Username',
+  'password': 'Password',
+  
+  // Location
+  'location.city': 'City',
+  'location.country': 'Country',
+  'location.lat': 'Latitude',
+  'location.lon': 'Longitude',
+
+  // HTTP / Web
+  'method': 'HTTP Method',
+  'path': 'Request Path',
+  'user_agent': 'User Agent',
+  'headers.User-Agent': 'User Agent (Header)',
+  'headers.Host': 'Host Header',
+  'headers.Content-Type': 'Content Type',
+  'headers.Authorization': 'Auth Header',
+  
+  // Arguments & Payloads
+  'args.cmd': 'Command Argument',
+  'args.username': 'Username Argument',
+  'args.password': 'Password Argument',
+  'args.country': 'Country Argument',
+  'data.function_code': 'Function Code',
+  'data.transaction_id': 'Transaction ID',
+  
+  // Session
+  'session.start': 'Session Start',
+  'session.end': 'Session End',
+  'session.ip': 'Session IP',
+};
+
+// Helper to format unknown keys prettily
+const formatFilterLabel = (key) => {
+  // 1. Check if we have a direct mapping
+  if (FIELD_LABELS[key]) {
+    return FIELD_LABELS[key];
+  }
+
+  // 2. Fallback: Prettify the dot notation
+  // e.g., "headers.Accept-Encoding" -> "Headers › Accept Encoding"
+  return key
+    .split('.')
+    .map((part) => {
+      // Replace underscores/dashes with spaces and capitalize
+      return part
+        .replace(/[-_]/g, ' ')
+        .replace(/\b\w/g, (l) => l.toUpperCase());
+    })
+    .join(' › ');
+};
+
 // ---------- DASHBOARD PAGE ----------
 
 const Dashboard = () => {
@@ -41,6 +101,10 @@ const Dashboard = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [availableFields, setAvailableFields] = useState([]);
 
+  // --- MAP STATE ---
+  const mapImgRef = useRef(null);
+  const [mapSize, setMapSize] = useState({ width: 800, height: 400 });
+
   useEffect(() => {
     fetchDashboardData();
     const interval = setInterval(fetchDashboardData, 10000);
@@ -48,7 +112,30 @@ const Dashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Extract all available fields from logs
+  // --- MAP RESIZE LISTENER ---
+  useEffect(() => {
+    const updateSize = () => {
+      try {
+        const img = mapImgRef.current;
+        if (img) {
+          const rect = img.getBoundingClientRect();
+          if (rect.width && rect.height) {
+            setMapSize({ width: rect.width, height: rect.height });
+          }
+        }
+      } catch (e) {
+        // ignore errors if ref is not yet available
+      }
+    };
+    
+    window.addEventListener('resize', updateSize);
+    // Initial check
+    updateSize();
+    
+    return () => window.removeEventListener('resize', updateSize);
+  }, []);
+
+  // Extract all available fields from logs for filtering
   useEffect(() => {
     const fields = new Set();
     logs.forEach((log) => {
@@ -104,7 +191,6 @@ const Dashboard = () => {
         throw new Error(`HTTP ${res.status}`);
       }
 
-      // Backend returns plain text: contents of logs/<protocol>.logs
       const text = await res.text();
       setRawLogs(text || '(No log data yet)');
     } catch (err) {
@@ -115,14 +201,12 @@ const Dashboard = () => {
     }
   };
 
-  // Get nested value from object using dot notation
   const getNestedValue = (obj, path) => {
     return path.split('.').reduce((current, key) => {
       return current && typeof current === 'object' ? current[key] : undefined;
     }, obj);
   };
 
-  // Filter logs based on active filters
   const getFilteredLogs = () => {
     if (Object.keys(filters).length === 0) {
       return logs;
@@ -131,7 +215,7 @@ const Dashboard = () => {
     return logs.filter((log) => {
       return Object.entries(filters).every(([field, filterValue]) => {
         if (!filterValue || filterValue.trim() === '') {
-          return true; // Empty filter means no filtering for this field
+          return true;
         }
 
         const value = getNestedValue(log, field);
@@ -140,14 +224,12 @@ const Dashboard = () => {
           return false;
         }
 
-        // Convert to string for comparison
         const valueStr = typeof value === 'object' 
           ? JSON.stringify(value).toLowerCase()
           : String(value).toLowerCase();
         
         const filterStr = filterValue.toLowerCase();
         
-        // Check if value contains the filter string
         return valueStr.includes(filterStr);
       });
     });
@@ -210,6 +292,97 @@ const Dashboard = () => {
     return colors[protocol?.toLowerCase()] || '#8B8B8B';
   };
 
+  // Helper to map Lat/Lon to X/Y on an Equirectangular map image
+  const latLonToXY = (lat, lon, width, height) => {
+    const x = ((lon + 180) / 360) * width;
+    const y = ((90 - lat) / 180) * height;
+    return { x, y };
+  };
+
+  const renderWorldMap = () => {
+    const markers = getLocationMarkers();
+    const imgSrc = '/world-map.svg';
+
+    const containerStyle = {
+      position: 'relative',
+      width: '100%',
+      height: 'auto',
+      minHeight: '240px',
+      backgroundColor: '#f8f8f8',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    };
+
+    const imgStyle = {
+      display: 'block',
+      width: '100%',
+      height: 'auto',
+      userSelect: 'none',
+    };
+
+    const overlayStyle = {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      pointerEvents: 'none'
+    };
+
+    const onImgLoad = (e) => {
+      try {
+        const img = e.target;
+        const rect = img.getBoundingClientRect();
+        if (rect.width && rect.height) {
+          setMapSize({ width: rect.width, height: rect.height });
+        }
+      } catch (err) {
+        // Fallback size if something goes wrong
+        setMapSize({ width: 800, height: 400 });
+      }
+    };
+
+    return (
+      <div style={containerStyle} className="rounded-lg overflow-hidden border border-gray-200">
+        <img
+          ref={mapImgRef}
+          src={imgSrc}
+          alt="World Map"
+          style={imgStyle}
+          onLoad={onImgLoad}
+          onError={(e) => {
+            console.error("Failed to load map image");
+            e.target.style.display = 'none'; // Hide broken image icon
+          }}
+        />
+        
+        {/* SVG Overlay for attack dots */}
+        <svg style={overlayStyle} viewBox={`0 0 ${mapSize.width} ${mapSize.height}`} preserveAspectRatio="none">
+          {markers.map((marker, i) => {
+            const lat = Number(marker.lat) || 0;
+            const lon = Number(marker.lon) || 0;
+            const { x, y } = latLonToXY(lat, lon, mapSize.width, mapSize.height);
+            const r = Math.min(marker.count * 2 + 5, 18);
+
+            return (
+              <g key={marker.ip || i} transform={`translate(${x}, ${y})`}>
+                <circle r={r} fill="#D4A574" opacity="0.6" />
+                <circle r={Math.max(2, Math.floor(r / 3))} fill="#8B6F47" />
+                <title>{`${marker.ip}: ${marker.count} events`}</title>
+              </g>
+            );
+          })}
+        </svg>
+        
+        <div className="absolute bottom-2 left-2 text-xs text-gray-500 bg-white/80 px-2 py-1 rounded shadow-sm">
+          <Globe className="w-3 h-3 inline mr-1" />
+          Attack Origin Map
+        </div>
+      </div>
+    );
+  };
+
   const renderDonutChart = () => {
     const data = getProtocolData();
     const total = data.reduce((sum, d) => sum + d.value, 0);
@@ -260,56 +433,6 @@ const Dashboard = () => {
           {total}
         </text>
       </svg>
-    );
-  };
-
-  const renderWorldMap = () => {
-    const markers = getLocationMarkers();
-
-    return (
-      <div className="relative w-full h-full bg-gray-50 rounded-lg overflow-hidden">
-        <svg viewBox="0 0 800 400" className="w-full h-full">
-          {/* Simplified world map outline */}
-          <path
-            d="M50,200 Q200,150 400,200 T750,200"
-            stroke="#D4A574"
-            strokeWidth="2"
-            fill="none"
-            opacity="0.3"
-          />
-          <path
-            d="M50,250 Q200,220 400,250 T750,250"
-            stroke="#D4A574"
-            strokeWidth="2"
-            fill="none"
-            opacity="0.3"
-          />
-
-          {/* Plot markers based on lat/long */}
-          {markers.map((marker, i) => {
-            const x = ((marker.lon + 180) / 360) * 800;
-            const y = ((90 - marker.lat) / 180) * 400;
-
-            return (
-              <g key={i}>
-                <circle
-                  cx={x}
-                  cy={y}
-                  r={Math.min(marker.count * 2 + 5, 20)}
-                  fill="#D4A574"
-                  opacity="0.6"
-                />
-                <circle cx={x} cy={y} r="3" fill="#8B6F47" />
-                <title>{`${marker.ip}: ${marker.count} events`}</title>
-              </g>
-            );
-          })}
-        </svg>
-        <div className="absolute bottom-2 left-2 text-xs text-gray-500">
-          <Globe className="w-4 h-4 inline mr-1" />
-          Attack Origin Map
-        </div>
-      </div>
     );
   };
 
@@ -379,7 +502,9 @@ const Dashboard = () => {
             <Globe className="w-5 h-5 mr-2 text-gray-600" />
             Attack Origin Map
           </h3>
-          <div className="h-80">{renderWorldMap()}</div>
+          <div className="h-80 flex items-center justify-center bg-gray-50 rounded">
+            {renderWorldMap()}
+          </div>
         </div>
 
         {/* Protocol Distribution */}
@@ -451,7 +576,7 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {/* Filter Panel */}
+          {/* Filter Panel - MODIFIED SECTION */}
           {showFilters && (
             <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
               <div className="flex items-center justify-between mb-3">
@@ -466,14 +591,14 @@ const Dashboard = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-64 overflow-y-auto">
                 {availableFields.map((field) => (
                   <div key={field} className="flex flex-col">
-                    <label className="text-xs font-medium text-gray-600 mb-1">
-                      {field}
+                    <label className="text-xs font-medium text-gray-600 mb-1" title={field}>
+                      {formatFilterLabel(field)}
                     </label>
                     <input
                       type="text"
                       value={filters[field] || ''}
                       onChange={(e) => handleFilterChange(field, e.target.value)}
-                      placeholder={`Filter by ${field}`}
+                      placeholder={`Filter...`}
                       className="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-gray-400 focus:border-transparent"
                     />
                   </div>
@@ -1012,4 +1137,3 @@ const App = () => {
 };
 
 export default App;
-
