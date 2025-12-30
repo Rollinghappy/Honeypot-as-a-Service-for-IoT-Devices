@@ -55,6 +55,7 @@ const FIELD_LABELS = {
   'args.country': 'Country Argument',
   'data.function_code': 'Function Code',
   'data.transaction_id': 'Transaction ID',
+  'data.unit_id': 'Unit ID',
   
   // Session
   'session.start': 'Session Start',
@@ -100,6 +101,7 @@ const Dashboard = () => {
   const [filters, setFilters] = useState({});
   const [showFilters, setShowFilters] = useState(false);
   const [availableFields, setAvailableFields] = useState([]);
+  const [fieldProtocols, setFieldProtocols] = useState({}); // New state to track protocols per field
 
   // --- MAP STATE ---
   const mapImgRef = useRef(null);
@@ -135,10 +137,14 @@ const Dashboard = () => {
     return () => window.removeEventListener('resize', updateSize);
   }, []);
 
-  // Extract all available fields from logs for filtering
+  // Extract all available fields from logs AND track which protocol they belong to
   useEffect(() => {
     const fields = new Set();
+    const fieldProtoMap = {}; // Maps 'field.name' -> Set('SSH', 'HTTP')
+
     logs.forEach((log) => {
+      const proto = log.protocol ? log.protocol.toUpperCase() : 'UNKNOWN';
+
       const extractFields = (obj, prefix = '') => {
         if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
           Object.keys(obj).forEach((key) => {
@@ -148,6 +154,12 @@ const Dashboard = () => {
                 extractFields(obj[key], fullKey);
               } else {
                 fields.add(fullKey);
+                
+                // Track which protocol this field was seen in
+                if (!fieldProtoMap[fullKey]) {
+                  fieldProtoMap[fullKey] = new Set();
+                }
+                fieldProtoMap[fullKey].add(proto);
               }
             }
           });
@@ -155,7 +167,9 @@ const Dashboard = () => {
       };
       extractFields(log);
     });
+
     setAvailableFields(Array.from(fields).sort());
+    setFieldProtocols(fieldProtoMap);
   }, [logs]);
 
   const fetchDashboardData = async () => {
@@ -589,20 +603,35 @@ const Dashboard = () => {
                 </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-64 overflow-y-auto">
-                {availableFields.map((field) => (
-                  <div key={field} className="flex flex-col">
-                    <label className="text-xs font-medium text-gray-600 mb-1" title={field}>
-                      {formatFilterLabel(field)}
-                    </label>
-                    <input
-                      type="text"
-                      value={filters[field] || ''}
-                      onChange={(e) => handleFilterChange(field, e.target.value)}
-                      placeholder={`Filter...`}
-                      className="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-gray-400 focus:border-transparent"
-                    />
-                  </div>
-                ))}
+                {availableFields.map((field) => {
+                  // Generate protocol tags
+                  const protos = fieldProtocols[field] ? Array.from(fieldProtocols[field]) : [];
+                  const protoLabel = protos.length > 0 && protos.length <= 4
+                    ? `(${protos.join(', ')})` 
+                    : protos.length > 4 ? '(General)' : '';
+
+                  return (
+                    <div key={field} className="flex flex-col">
+                      <div className="flex items-baseline mb-1">
+                        <label className="text-xs font-medium text-gray-600 mr-2" title={field}>
+                          {formatFilterLabel(field)}
+                        </label>
+                        {protoLabel && (
+                          <span className="text-[10px] text-gray-400 font-mono uppercase tracking-tight">
+                            {protoLabel}
+                          </span>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        value={filters[field] || ''}
+                        onChange={(e) => handleFilterChange(field, e.target.value)}
+                        placeholder="Filter..."
+                        className="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-gray-400 focus:border-transparent"
+                      />
+                    </div>
+                  );
+                })}
               </div>
               {availableFields.length === 0 && (
                 <div className="text-sm text-gray-400 text-center py-4">
