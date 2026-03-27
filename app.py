@@ -6,6 +6,7 @@ from pathlib import Path
 from datetime import datetime
 import subprocess
 import requests
+import sys
 
 app = Flask(__name__, static_folder='build', static_url_path='')
 CORS(app)
@@ -24,6 +25,7 @@ SCRIPT_NAME_MAP = {
 
 # Simple in-memory tracking of running honeypots
 running_honeypots = {}
+honeypot_processes = {}
 
 # IP Geolocation cache
 ip_location_cache = {}
@@ -377,15 +379,22 @@ def api_start_honeypot(protocol):
 
             # Start detached child that does NOT inherit parent's open FDs.
             # close_fds=True prevents inheriting the dashboard's listening sockets
-            # start_new_session=True isolates the process (like setsid)
+            # start_new_session=True isolates the process (like setsid), but only works on posix
+            kwargs = {
+                'stdout': stdout_f,
+                'stderr': stderr_f,
+                'cwd': HONEYPOTS_DIR,
+                'env': child_env,
+                'close_fds': True
+            }
+            if os.name == 'posix':
+                kwargs['start_new_session'] = True
+            elif os.name == 'nt':
+                kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
+
             process = subprocess.Popen(
-                ['python3', str(honeypot_script)],
-                stdout=stdout_f,
-                stderr=stderr_f,
-                cwd=HONEYPOTS_DIR,
-                env=child_env,
-                close_fds=True,
-                start_new_session=True
+                [sys.executable, str(honeypot_script)],
+                **kwargs
             )
 
             # Bookkeeping: store PID and log paths so you can stop/inspect later
@@ -395,19 +404,21 @@ def api_start_honeypot(protocol):
                 'stderr_log': str(stderr_path),
                 'script': str(honeypot_script)
             }
+            honeypot_processes[protocol] = process
 
             return jsonify({'success': True, 'message': f'{protocol} honeypot started', 'pid': process.pid})
 
         else:
             # --- Default behavior for other protocols (unchanged) ---
             process = subprocess.Popen(
-                ['python3', str(honeypot_script)],
+                [sys.executable, str(honeypot_script)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 cwd=HONEYPOTS_DIR
             )
             # For compatibility with existing UI/logic keep the same "running" flag shape
             running_honeypots[protocol] = True
+            honeypot_processes[protocol] = process
 
             return jsonify({'success': True, 'message': f'{protocol} honeypot started'})
 
@@ -425,8 +436,22 @@ def api_stop_honeypot(protocol):
     return jsonify({'error': 'Honeypot not running'}), 400
 
   try:
-    # In real deployment, track & kill the process by PID.
-    del running_honeypots[protocol]
+    # Terminate the process if we have the reference
+    process = honeypot_processes.pop(protocol, None)
+    if process:
+        try:
+            process.terminate()
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        except Exception as e:
+            print(f"Error killing {protocol} process: {e}")
+
+    # For any cases where process was lost but it's in running_honeypots
+    if protocol in running_honeypots:
+        del running_honeypots[protocol]
+        
     return jsonify({'success': True, 'message': f'{protocol} honeypot stopped'})
   except Exception as e:
     return jsonify({'error': str(e)}), 500

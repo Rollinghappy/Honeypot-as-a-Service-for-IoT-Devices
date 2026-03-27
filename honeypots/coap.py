@@ -483,16 +483,19 @@ class CoAPSession:
         
         # UPDATED: default log_directory -> ../logs
         log_dir = Path(self.config.get("log_directory", "../logs"))
-        attacks_dir = log_dir / "requests"
-        attacks_dir.mkdir(parents=True, exist_ok=True)
+        log_dir.mkdir(parents=True, exist_ok=True)
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         ip = self.addr[0].replace(".", "_")
-        filename = attacks_dir / f"request_{ip}_{timestamp}.json"
+        filename = log_dir / f"session_{ip}_{timestamp}.json"
         
         with open(filename, 'w') as f:
             json.dump({
-                "client": {"ip": self.addr[0], "port": self.addr[1]},
+                "session_info": {
+                    "ip": self.addr[0],
+                    "port": self.addr[1],
+                    "protocol": "coap"
+                },
                 "activity": self.session_log
             }, f, indent=2)
 

@@ -814,6 +814,55 @@ const Dashboard = () => {
 
 // ---------- SETTINGS PAGE ----------
 
+const ProtocolSpecificEditor = ({ config, onUpdate }) => {
+  const getAdvancedFields = (cfg) => {
+    const { host, port, hostname, banner, allow_all_logins, log_directory, log_file, ...advanced } = cfg || {};
+    return advanced;
+  };
+
+  const [localValue, setLocalValue] = useState(() => JSON.stringify(getAdvancedFields(config), null, 2));
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    setLocalValue(JSON.stringify(getAdvancedFields(config), null, 2));
+    setError(false);
+  }, [config]);
+
+  const handleBlur = () => {
+    try {
+      if (!localValue.trim()) {
+        onUpdate({});
+        return;
+      }
+      const parsed = JSON.parse(localValue);
+      setError(false);
+      onUpdate(parsed);
+      setLocalValue(JSON.stringify(parsed, null, 2));
+    } catch {
+      setError(true);
+    }
+  };
+
+  return (
+    <div>
+      <textarea
+        value={localValue}
+        onChange={(e) => setLocalValue(e.target.value)}
+        onBlur={handleBlur}
+        rows={15}
+        className={`w-full px-3 py-2 border rounded-lg font-mono text-sm focus:ring-2 focus:border-transparent focus:outline-none ${
+          error ? 'border-red-500 bg-red-50 focus:ring-red-400' : 'border-gray-300 focus:ring-gray-400'
+        }`}
+      />
+      {error && (
+        <p className="text-xs text-red-500 mt-1">
+          Invalid JSON format. Please correct it before saving.
+        </p>
+      )}
+    </div>
+  );
+};
+
 const SettingsPage = () => {
   const [configs, setConfigs] = useState({});
   const [selectedProtocol, setSelectedProtocol] = useState('telnet');
@@ -853,6 +902,32 @@ const SettingsPage = () => {
         [field]: value
       }
     }));
+  };
+
+  const handleAdvancedUpdate = (advancedFields) => {
+    setConfigs((prev) => {
+      const current = prev[selectedProtocol] || {};
+      const { host, port, hostname, banner, allow_all_logins, log_directory, log_file } = current;
+      
+      const newConfig = {
+        host,
+        port,
+        hostname,
+        banner,
+        allow_all_logins,
+        log_directory,
+        log_file,
+        ...advancedFields
+      };
+
+      // Clean up undefined fields
+      Object.keys(newConfig).forEach(key => newConfig[key] === undefined && delete newConfig[key]);
+
+      return {
+        ...prev,
+        [selectedProtocol]: newConfig
+      };
+    });
   };
 
   const saveConfig = async () => {
@@ -1028,72 +1103,16 @@ const SettingsPage = () => {
           {/* Advanced Settings */}
           <div className="space-y-4">
             <h3 className="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2">
-              Advanced Settings
+              Protocol-Specific Settings (JSON)
             </h3>
+            <p className="text-sm text-gray-500 mb-2">
+              Edit raw configuration for advanced features (e.g., Modbus registers, MQTT devices, SSH credentials). Changes take effect after your next save.
+            </p>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Valid Credentials
-              </label>
-              <textarea
-                value={JSON.stringify(
-                  currentConfig.valid_credentials || {},
-                  null,
-                  2
-                )}
-                onChange={(e) => {
-                  try {
-                    handleConfigChange(
-                      'valid_credentials',
-                      JSON.parse(e.target.value)
-                    );
-                  } catch {
-                    // ignore JSON errors for now
-                  }
-                }}
-                rows={5}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-gray-400 focus:border-transparent"
-                placeholder='{"username": "password"}'
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Filesystem Structure
-              </label>
-              <textarea
-                value={JSON.stringify(currentConfig.filesystem || {}, null, 2)}
-                onChange={(e) => {
-                  try {
-                    handleConfigChange('filesystem', JSON.parse(e.target.value));
-                  } catch {
-                    // ignore
-                  }
-                }}
-                rows={6}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-gray-400 focus:border-transparent"
-                placeholder='{"/": ["bin", "etc"]}'
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Custom Files
-              </label>
-              <textarea
-                value={JSON.stringify(currentConfig.files || {}, null, 2)}
-                onChange={(e) => {
-                  try {
-                    handleConfigChange('files', JSON.parse(e.target.value));
-                  } catch {
-                    // ignore
-                  }
-                }}
-                rows={5}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-gray-400 focus:border-transparent"
-                placeholder='{"/etc/passwd": "content"}'
-              />
-            </div>
+            <ProtocolSpecificEditor
+              config={currentConfig}
+              onUpdate={handleAdvancedUpdate}
+            />
           </div>
         </div>
 

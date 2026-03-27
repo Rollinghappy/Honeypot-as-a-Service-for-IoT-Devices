@@ -160,15 +160,23 @@ class HTTPHoneypot:
     def save_attack_log(self, log_entry):
         """Save individual attack logs"""
         log_dir = Path(self.config.get("log_directory", "../logs"))
-        attacks_dir = log_dir / "attacks"
-        attacks_dir.mkdir(exist_ok=True, parents=True)
+        log_dir.mkdir(exist_ok=True, parents=True)
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         ip = log_entry.get("ip", "unknown").replace(".", "_")
-        filename = attacks_dir / f"attack_{ip}_{timestamp}.json"
+        filename = log_dir / f"session_{ip}_{timestamp}.json"
+        
+        log_entry["protocol"] = "http"
+        log_entry["type"] = log_entry.get("endpoint", "http_request")
         
         with open(filename, 'w') as f:
-            json.dump(log_entry, f, indent=2)
+            json.dump({
+                "session_info": {
+                    "ip": log_entry.get("ip", "unknown"),
+                    "protocol": "http"
+                },
+                "activity": [log_entry]
+            }, f, indent=2)
     
     def check_auth(self, auth_header):
         """Check HTTP Basic Auth"""
