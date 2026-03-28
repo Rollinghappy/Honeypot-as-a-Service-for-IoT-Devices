@@ -86,10 +86,28 @@ const formatFilterLabel = (key) => {
 // ---------- DASHBOARD PAGE ----------
 
 const Dashboard = () => {
-  const [logs, setLogs] = useState([]);
-  const [stats, setStats] = useState({});
+  const [logs, setLogs] = useState(() => {
+    try {
+      const cached = localStorage.getItem('dashboard_logs');
+      return cached ? JSON.parse(cached) : [];
+    } catch { return []; }
+  });
+  
+  const [stats, setStats] = useState(() => {
+    try {
+      const cached = localStorage.getItem('dashboard_stats');
+      return cached ? JSON.parse(cached) : {};
+    } catch { return {}; }
+  });
+  
   const [selectedAttack, setSelectedAttack] = useState(null);
-  const [loading, setLoading] = useState(true);
+  
+  const [loading, setLoading] = useState(() => {
+    try {
+      const cachedLogs = localStorage.getItem('dashboard_logs');
+      return !cachedLogs;
+    } catch { return true; }
+  });
 
   // raw log viewer state
   const [rawProtocol, setRawProtocol] = useState('ssh');
@@ -182,8 +200,17 @@ const Dashboard = () => {
       const logsData = await logsRes.json();
       const statsData = await statsRes.json();
 
-      setLogs(Array.isArray(logsData) ? logsData : []);
-      setStats(statsData || {});
+      const newLogs = Array.isArray(logsData) ? logsData : [];
+      const newStats = statsData || {};
+
+      setLogs(newLogs);
+      setStats(newStats);
+      
+      try {
+        localStorage.setItem('dashboard_logs', JSON.stringify(newLogs));
+        localStorage.setItem('dashboard_stats', JSON.stringify(newStats));
+      } catch(e) { /* ignore quota errors */ }
+
       setLoading(false);
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
